@@ -1,0 +1,31 @@
+# Môi trường ảo (Virtual Environments)
+.venv/
+venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Biến môi trường và Bảo mật (TUYỆT ĐỐI KHÔNG PUSH LÊN GIT)
+.env
+.env.*
+*.key
+*.pem
+
+# IDE & Editor Configs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs & Temporary Test Files
+*.log
+.coverage
+htmlcov/
+
+# PDF & Documentation
+*.pdf
