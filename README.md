@@ -1,101 +1,64 @@
 # Hệ Thống Agent Đặt Vé Máy Bay & Lớp Harness Kiểm Soát An Toàn
 
-## 📑 BÁO CÁO KỸ THUẬT CHUYÊN SÂU
-Toàn bộ phân tích kiến trúc, vai trò từng file, các hàm chốt chặn trong Harness và đánh giá sự đánh đổi kỹ thuật (Engineering Trade-offs) giữa 3 mẫu Agent được trình bày chi tiết tại:  
-👉 **[Xem Báo cáo Chi tiết: baocao_BTVN3.md](baocao_BTVN3.md)**
+> **BÀI TẬP VỀ NHÀ #3 - MÔN KỸ THUẬT XÂY DỰNG HỆ THỐNG AGENTIC AI (SE373.R11)**  
+> **Trường Đại học Công nghệ Thông tin - ĐHQG-HCM (UIT)**  
+> **Sinh viên thực hiện:** Cao Tiến Phát  
+> **MSSV:** 24521289  
+> 📄 **Báo cáo kỹ thuật chi tiết:** [Tải file PDF Báo cáo Hoàn chỉnh](./Cao%20Tiến%20Phát%20-%2024521289%20-%20Tuần%203.pdf)
 
 ---
 
 ## 🌟 Giới Thiệu Dự Án
-Dự án cài đặt và kiểm thử hệ thống Agent đặt vé máy bay tự động bằng LangChain, phân định rạch ròi giữa **Bộ não suy luận (Model)** và **Khung giàn điều phối & an toàn (Harness)**.
 
-### 1. Ba mẫu thiết kế suy luận của Agent
-* **ReAct** (`agent/react_agent.py`): Suy luận đan xen hành động từng bước (`Thought -> Action -> Observation`), thích ứng cực nhạy với biến động môi trường.
-* **Plan-then-Execute** (`agent/plan_execute_agent.py`): Lập kế hoạch tĩnh dạng JSON và thực thi tuần tự bằng code, tối ưu chi phí token.
-* **Mẫu Lai - Hybrid** (`agent/hybrid_agent.py`): Kết hợp ưu điểm của cả hai, trang bị cảm biến phát hiện biến cố để tự động tái lập kế hoạch (*Dynamic Re-planning*).
+Dự án nghiên cứu, hiện thực và đánh giá đối chuẩn (*Benchmarking*) một hệ thống **Agentic AI** tự động hóa quy trình nghiệp vụ đặt vé máy bay nội địa. Hệ thống được xây dựng bám sát nguyên lý cốt lõi:
+$$\text{Agent} = \text{Goal} + \text{Tools} + \text{Loop} + \text{Termination}$$
 
-### 2. Khung giàn Harness kiểm soát an toàn đa tầng
-* **Constraints as Data**: Đóng gói yêu cầu người dùng thành dữ liệu bất biến, chống trôi dạt mục tiêu (*Goal Drift*).
-* **Pre-tool Action Authorization**: Tiền kiểm quyền hạn trước khi gọi tool (chặn thanh toán vượt trần, chặn vé không hoàn tiền).
-* **Computational Sensor**: Nghiệm thu kết quả bằng code thuần trong CSDL thực tế, không tin vào lời tuyên bố chủ quan của LLM.
-* **Loop & Stall Detection**: Bắt lặp thao tác qua cửa sổ trượt và bắt bế tắc tiến trình.
-* **Handoff Protocol**: Bàn giao con người chuẩn 30 giây khi vượt thẩm quyền.
-* **Anti-Hallucination Synthesizer**: Trích xuất dữ liệu vé thật trong CSDL để trả lời khách hàng.
+Phân định ranh giới rạch ròi giữa 3 thành phần:
+* **Môi trường Sandbox (*Environment*):** CSDL bộ nhớ giả lập chuyến bay và 5 công cụ chuẩn hóa theo schema LangChain.
+* **Bộ não suy luận (*Reasoning Model*):** Thử nghiệm trên 3 mẫu thiết kế Agent khác nhau.
+* **Khung giàn điều phối & An toàn (*Safety Harness*):** Lớp vỏ kiểm soát đa tầng bảo đảm an toàn tài chính và phòng chống suy luận mất kiểm soát.
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt & Chạy Dự Án
+## 🏛️ Kiến Trúc Hệ Thống
 
-### 1. Clone repository từ GitHub
-```bash
-git clone https://github.com/phatcao026/agent-dat-ve-may-bay.git
-cd agent-dat-ve-may-bay
-```
+### 1. Ba Mẫu Thiết Kế Agent Suy Luận
+* **ReAct Agent (`agent/react_agent.py`):** Chu trình suy luận đan xen hành động từng bước (`Thought -> Action -> Observation`). Khả năng thích ứng cao nhưng chi phí token tăng theo cấp số nhân $O(n^2)$.
+* **Plan-then-Execute (`agent/plan_execute_agent.py`):** Phân rã tác vụ thành 2 pha tách biệt: Lập kế hoạch tĩnh ban đầu bằng LLM và thực thi cơ học bằng code. Chi phí token tối thiểu nhưng dễ gãy đổ khi môi trường thay đổi (*Stale Plan*).
+* **Mẫu Lai - Adaptive Hybrid (`agent/hybrid_agent.py`):** Kết hợp kế hoạch khung định hướng với bộ cảm biến phát hiện biến cố (`is_observation_significantly_changed`) để tự động kích hoạt **Re-planner** khi gặp sự cố (như hết vé), đạt hiệu năng tối ưu toàn diện.
 
-### 2. Khởi tạo môi trường ảo (Khuyến nghị)
-* **Trên Windows (PowerShell)**:
-  ```powershell
-  python -m venv .venv
-  .venv\Scripts\Activate.ps1
-  ```
-* **Trên Linux / macOS**:
-  ```bash
-  python3 -m venv .venv
-  source .venv/bin/activate
-  ```
-
-### 3. Cài đặt các thư viện phụ thuộc
-```bash
-pip install -r requirements.txt
-```
+### 2. Lớp Giám Hộ An Toàn (Safety Harness) & Giao Thức Bàn Giao 30s
+* **Ràng buộc là dữ liệu cứng (*Constraints as Data*):** Đóng gói yêu cầu người dùng (điểm đi, điểm đến, trần ngân sách, chính sách hoàn hủy) thành dữ liệu bất biến, chống hiện tượng trôi dạt mục tiêu (*Goal Drift*).
+* **Trạm 0 - Tiền kiểm thẩm quyền (*Pre-tool Check*):** Chặn đứng các hành động có rủi ro tài chính (thanh toán vượt trần ngân sách, giữ chỗ chuyến bay không hoàn hủy) trước khi công cụ kịp can thiệp CSDL.
+* **Trạm 1 - Hậu kiểm và chống lặp (*Post-tool Check*):** Bộ cảm biến tính toán (`LoopDetector`, `StepBudget`) phát hiện bế tắc và vòng lặp vô hạn để ngắt tác vụ an toàn.
+* **Cảm biến nghiệm thu độc lập (*Computational Sensor*):** Kiểm tra trực tiếp trạng thái `confirmed` và `paid` trong CSDL thực tế, không tin vào lời tuyên bố chủ quan của LLM.
+* **Giao thức bàn giao 30 giây (*Human Handoff Protocol*):** Khi phát hiện vi phạm ranh giới an toàn, tự động dừng tác vụ và hiển thị bản tóm tắt trạng thái cùng câu hỏi quyết định cho con người phê duyệt.
 
 ---
 
-## 🎮 Cách Thực Thi Hệ Thống
+## 📊 Bảng Đánh Giá Thực Nghiệm (Benchmark)
 
-### Cách 1: Giao diện CLI Tương tác Dòng lệnh
-```bash
-python main.py
-```
-Menu hiển thị 3 chế độ tương tác:
-* **[1] Đặt vé tương tác từ bàn phím**: Tự do nhập điểm đi, điểm đến, ngày bay, ngân sách và chọn 1 trong 3 Agent để quan sát chu trình suy luận từng bước và phản hồi tự nhiên ở cuối.
-* **[2] Chạy tự động Benchmark 4 Kịch bản**: Chạy kiểm thử tự động toàn bộ ma trận 12 lượt đo đạc.
-* **[3] Xem lịch sử benchmark gần nhất**: In bảng tổng hợp số liệu (Token, Latency, Mã dừng) trích xuất trực tiếp từ file `benchmark_history.json` trong 0.1 giây.
+*Số liệu đo đạc thực tế từ hạ tầng **GPU Server UIT** sử dụng mô hình **`gemma-4-26b`** qua 4 kịch bản biên chuẩn hóa:*
 
----
+| Kịch bản kiểm thử (*Scenario*) | Mẫu thiết kế Agent | Tỷ lệ Thành công | Kiểu dừng (*Termination*) | Số bước | Token thực tế | Thời gian (*Latency*) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Kịch bản 1: Thuận lợi** (*Happy Path - VN122*) | **ReAct Agent** | ✅ Đạt | `SUCCESS` | 4 | 4,997 | 10.16s |
+| | **Plan-then-Execute** | ❌ Không | `FAILED_STALE_PLAN` | 0 | 571 | 2.96s |
+| | **Hybrid (Plan+ReAct)** | ✅ Đạt | `SUCCESS` | 4 | **2,200** | **8.62s** |
+| **Kịch bản 2: Hết vé rẻ nhất** (*Sold Out - VJ604*) | **ReAct Agent** | ✅ Đạt | `SUCCESS` | 4 | 4,997 | 24.06s |
+| | **Plan-then-Execute** | ❌ Không | `FAILED_STALE_PLAN` | 0 | 573 | 4.00s |
+| | **Hybrid (Plan+ReAct)** | ✅ Đạt | `SUCCESS` | 4 | **2,200** | **7.88s** |
+| **Kịch bản 3: Quá ngân sách** (*Over Budget - QH118*) | **ReAct Agent** | ❌ Không | `LOOP` / Lặp | 5 | 8,633 | 15.59s |
+| | **Plan-then-Execute** | ❌ Không | `FAILED_STALE_PLAN` | 0 | 571 | 2.84s |
+| | **Hybrid (Plan+ReAct)** | 🛡️ Chặn an toàn | `APPROVAL_NEEDED` | 3 | **1,400** | **8.10s** |
+| **Kịch bản 4: Vé không hoàn hủy** (*Approval Gate - VN134*) | **ReAct Agent** | ❌ Không | `None` / Dừng sớm | 1 | 2,043 | 3.67s |
+| | **Plan-then-Execute** | ❌ Không | `FAILED_STALE_PLAN` | 0 | 573 | 3.09s |
+| | **Hybrid (Plan+ReAct)** | ❌ Không | `None` / Chặn | 4 | 5,045 | 19.84s |
 
-### Cách 2: Chạy Ma trận Benchmark Đánh giá (12 Ca kiểm thử)
-```bash
-python evaluate.py
-```
-Lệnh này sẽ tự động:
-1. Đưa 3 mẫu Agent qua 4 kịch bản biên (Happy Path, Cháy vé rẻ nhất, Vượt trần ngân sách, Vé không hoàn tiền).
-2. Đo đếm số lượt gọi tool, chi phí token, thời gian thực thi.
-3. Tự động lưu vết dữ liệu vào file `benchmark_history.json`.
-4. Xuất bảng tổng hợp Markdown trực tiếp ra màn hình.
-
----
-
-## ⚙️ Cấu Hình Mô Hình Ngôn Ngữ (LLM Configuration)
-
-Mặc định hệ thống sử dụng **Mock LLM Offline** tích hợp sẵn (chạy tức thì, 0 đồng, không cần internet hay API Key).
-
-Nếu muốn kết nối với **Mô hình AI Thật**, tạo file `.env` tại thư mục gốc của dự án:
-
-### Lựa chọn A: Máy chủ GPU Nội bộ UIT (`llm.uit.edu.vn`)
-*(Yêu cầu kết nối mạng Wifi trường UIT hoặc đang bật VPN nội bộ trường)*:
-```env
-OPENAI_API_KEY="ma-api-key-cua-ban"
-OPENAI_API_BASE="https://llm.uit.edu.vn/qwen/v1"
-SE373_MODEL="qwen3.8-27b"
-```
-*(Hệ thống đã cài sẵn cấu hình tự động nhận diện mô hình Qwen của trường và tắt thinking `enable_thinking: False` để tối ưu hóa tốc độ gọi Tool).*
-
-### Lựa chọn B: OpenAI API
-```env
-OPENAI_API_KEY="sk-proj-..."
-SE373_MODEL="gpt-4o-mini"
-```
+### 💡 Sự Đánh Đổi Kỹ Thuật Then Chốt:
+1. **Chi phí Token vs. Tính thích ứng:** ReAct linh hoạt nhưng tiêu tốn token rất lớn (lên tới hơn 8.600 token). Plan-then-Execute siêu tiết kiệm (~570 token) nhưng mất hoàn toàn khả năng thích ứng khi môi trường đổi khác.
+2. **Ưu thế Mẫu Lai (Hybrid):** Tiết kiệm **hơn 55% token** so với ReAct (chỉ ~2.200 token), vừa bám sát kế hoạch vừa tự động Re-plan khi có sự cố.
+3. **Quyền tự quyết vs. Ranh giới an toàn:** Lớp Harness chủ động ngắt tác vụ để hỏi ý kiến con người khi chạm trần ngân sách hoặc gặp vé không hoàn hủy, đổi lại sự an toàn tuyệt đối cho người dùng.
 
 ---
 
@@ -103,19 +66,78 @@ SE373_MODEL="gpt-4o-mini"
 
 ```text
 agent-dat-ve-may-bay/
-├── README.md               # Hướng dẫn cài đặt, thực thi và giới thiệu dự án
-├── baocao_BTVN3.md         # Báo cáo kỹ thuật phân tích chuyên sâu
-├── mock_env.py             # CSDL giả lập trong bộ nhớ & 5 LangChain Tools
-├── harness.py              # Khung giàn kiểm soát Harness 4 chốt chặn & Loop/Stall
-├── evaluate.py             # Kịch bản benchmark 12 ca chạy thực nghiệm
-├── main.py                 # Giao diện CLI tương tác đa chế độ
-├── benchmark_history.json  # Dữ liệu vết thực nghiệm gần nhất
-├── requirements.txt        # Danh sách thư viện phụ thuộc
-├── .gitignore              # Bỏ qua file rác và file .env
-└── agent/                  # Các mô hình suy luận
-    ├── __init__.py
-    ├── llm_setup.py        # Quản lý kết nối LLM (OpenAI / GPU UIT / Mock)
-    ├── react_agent.py      # ReAct Agent
-    ├── plan_execute_agent.py# Plan-then-Execute Agent
-    └── hybrid_agent.py     # Hybrid Agent với Dynamic Re-planning
+├── README.md                               # Tài liệu tổng quan và hướng dẫn hệ thống
+├── Cao Tiến Phát - 24521289 - Tuần 3.pdf    # Báo cáo kỹ thuật chính thức nộp môn học
+├── mock_env.py                             # [Tầng 0: Environment] CSDL giả lập & 5 LangChain Tools
+├── harness.py                              # [Tầng 1: Safety & Control] Khung giàn Harness 4 chốt chặn
+│
+├── agent/                                  # [Tầng 2: Reasoning Models] Cài đặt 3 Mẫu thiết kế Agent
+│   ├── __init__.py                         # Package khởi tạo
+│   ├── llm_setup.py                        # Factory LLM: switch giữa GPU UIT, OpenAI API và Mock Offline
+│   ├── react_agent.py                      # Mẫu 1: ReAct (Reasoning + Acting)
+│   ├── plan_execute_agent.py               # Mẫu 2: Plan-then-Execute
+│   └── hybrid_agent.py                     # Mẫu 3: Mẫu Lai (Plan + ReAct)
+│
+├── evaluate.py                             # [Tầng 3: Evaluation] Ma trận Benchmark 12 ca thử nghiệm
+├── main.py                                 # [Tầng 4: Presentation] Giao diện tương tác dòng lệnh CLI
+├── benchmark_history.json                  # Artifact lưu vết toàn bộ số liệu thực nghiệm
+├── requirements.txt                        # Danh sách thư viện phụ thuộc
+└── .gitignore                              # Cấu hình bảo mật git
 ```
+
+---
+
+## 🚀 Hướng Dẫn Cài Đặt & Chạy Dự Án
+
+### 1. Clone repository
+```bash
+git clone https://github.com/phatcao026/agent-dat-ve-may-bay.git
+cd agent-dat-ve-may-bay
+```
+
+### 2. Khởi tạo môi trường ảo & cài đặt thư viện
+```bash
+# Tạo và kích hoạt môi trường ảo (Windows PowerShell)
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# Cài đặt thư viện
+pip install -r requirements.txt
+```
+
+### 3. Thực thi hệ thống
+
+* **Giao diện dòng lệnh tương tác (CLI):**
+  ```bash
+  python main.py
+  ```
+  *Cho phép nhập trực tiếp hành trình bay, ngân sách và quan sát từng bước suy nghĩ của 3 Agent cùng giao diện bàn giao 30s.*
+
+* **Chạy ma trận đánh giá Benchmark 12 ca thử nghiệm:**
+  ```bash
+  python evaluate.py
+  ```
+  *Tự động chạy và xuất bảng tổng hợp số liệu đo đạc trực tiếp ra màn hình.*
+
+---
+
+## ⚙️ Cấu Hình Mô Hình Ngôn Ngữ (LLM Configuration)
+
+File `agent/llm_setup.py` hỗ trợ linh hoạt **3 chế độ vận hành** qua file cấu hình `.env` tại thư mục gốc:
+
+### Chế độ 1: Máy chủ GPU Nội bộ UIT (`llm.uit.edu.vn`)
+*(Yêu cầu kết nối mạng nội bộ trường UIT hoặc VPN trường)*:
+```env
+OPENAI_API_KEY="sk-uit-..."
+OPENAI_API_BASE="https://llm.uit.edu.vn/gemma/v1"
+SE373_MODEL="gemma-4-26b"
+```
+
+### Chế độ 2: API Key Thương Mại Ngoài (OpenAI / Google)
+```env
+OPENAI_API_KEY="sk-proj-..."
+SE373_MODEL="gpt-4o-mini"
+```
+
+### Chế độ 3: Chế độ Dự phòng Cục bộ (MockLLM Offline)
+Nếu không có file `.env` hoặc mất kết nối mạng, hệ thống tự động kích hoạt `MockFlightBookingLLM` tích hợp sẵn, bảo đảm chạy demo và kiểm thử 100% không bị crash.
