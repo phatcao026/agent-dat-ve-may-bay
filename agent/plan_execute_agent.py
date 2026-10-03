@@ -48,10 +48,18 @@ def run_plan_execute_agent(
     # --------------------------------------------------------------------------
     planner_prompt = (
         f"Bạn là AI Planner chuyên lập kế hoạch đặt vé máy bay.\n"
-        f"Nhiệm vụ: Hãy lập danh sách các bước JSON cần thực hiện để hoàn thành mục tiêu:\n"
-        f"- Bay từ {constraints.origin} đến {constraints.destination} ngày {constraints.depart_date}\n"
-        f"- Ngân sách: {constraints.max_price} VND, Khách: {constraints.passenger_name}\n"
-        f"Định dạng trả về: Danh sách JSON các bước gồm [{{'step': 1, 'tool': '...', 'args': {{...}}}}, ...]\n"
+        f"Nhiệm vụ: Hãy lập danh sách trọn vẹn 4 bước để đặt và thanh toán vé hoàn tất:\n"
+        f"1. search_flights: tìm chuyến bay từ {constraints.origin} đi {constraints.destination} ngày {constraints.depart_date}\n"
+        f"2. check_seat: kiểm tra ghế chuyến bay rẻ nhất thỏa trần giá {constraints.max_price} VND (VD: VN122 hoặc VJ604)\n"
+        f"3. book_seat: giữ chỗ ghế 12A cho khách {constraints.passenger_name}\n"
+        f"4. pay: thanh toán mã booking vừa giữ\n\n"
+        f"Ví dụ định dạng trả về:\n"
+        f"[\n"
+        f"  {{\"step\": 1, \"tool\": \"search_flights\", \"args\": {{\"origin\": \"{constraints.origin}\", \"destination\": \"{constraints.destination}\", \"date\": \"{constraints.depart_date}\"}}}},\n"
+        f"  {{\"step\": 2, \"tool\": \"check_seat\", \"args\": {{\"flight_id\": \"VN122\"}}}},\n"
+        f"  {{\"step\": 3, \"tool\": \"book_seat\", \"args\": {{\"flight_id\": \"VN122\", \"seat_number\": \"12A\", \"passenger_name\": \"{constraints.passenger_name}\"}}}},\n"
+        f"  {{\"step\": 4, \"tool\": \"pay\", \"args\": {{\"booking_id\": \"$PREV_BOOKING_ID\", \"payment_method\": \"corp_card\", \"amount\": 1850000}}}}\n"
+        f"]\n"
         f"Chỉ trả lời bằng JSON thuần, không thêm văn bản giải thích."
     )
 
@@ -81,9 +89,15 @@ def run_plan_execute_agent(
                 cleaned_json = cleaned_json[7:]
             if cleaned_json.startswith("```"):
                 cleaned_json = cleaned_json[3:]
-            if cleaned_json.endswith("```"):
-                cleaned_json = cleaned_json[:-3]
-            plan: List[Dict[str, Any]] = json.loads(cleaned_json.strip())
+            parsed_data = json.loads(cleaned_json.strip())
+            if isinstance(parsed_data, dict):
+                for val in parsed_data.values():
+                    if isinstance(val, list):
+                        parsed_data = val
+                        break
+                if not isinstance(parsed_data, list):
+                    parsed_data = [parsed_data]
+            plan = parsed_data if isinstance(parsed_data, list) else []
         else:
             plan = []
     except Exception as e:
@@ -130,7 +144,10 @@ def run_plan_execute_agent(
         if not target_tool:
             obs = json.dumps({"status": "error", "message": f"Không có tool '{tool_name}'"})
         else:
-            obs = target_tool.invoke(tool_args)
+            try:
+                obs = target_tool.invoke(tool_args)
+            except Exception as e:
+                obs = json.dumps({"status": "error", "message": f"Lỗi tham số khi gọi tool '{tool_name}': {e}"})
 
         if verbose:
             print(f"👁️ [Observation]: {obs}")

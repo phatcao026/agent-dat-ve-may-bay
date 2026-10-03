@@ -124,7 +124,13 @@ def run_hybrid_agent(
 
         # THỰC THI TOOL
         target_tool = TOOL_MAP.get(tool_name)
-        obs = target_tool.invoke(tool_args) if target_tool else "{}"
+        if not target_tool:
+            obs = json.dumps({"status": "error", "message": f"Không có tool '{tool_name}'"})
+        else:
+            try:
+                obs = target_tool.invoke(tool_args)
+            except Exception as e:
+                obs = json.dumps({"status": "error", "message": f"Lỗi tham số khi gọi tool '{tool_name}': {e}"})
 
         total_tokens_estimated += 400
 
@@ -175,14 +181,21 @@ def run_hybrid_agent(
                 rp_content = replan_res.content.strip()
                 if rp_content.startswith("```json"): rp_content = rp_content[7:]
                 if rp_content.startswith("```"): rp_content = rp_content[3:]
-                if rp_content.endswith("```"): rp_content = rp_content[:-3]
-                new_plan = json.loads(rp_content.strip())
-                # Thay thế phần kế hoạch còn lại bằng kế hoạch mới
-                current_plan = new_plan
-                step_pointer = 0
-                if verbose:
-                    print(f"✅ [Kế hoạch mới đã sẵn sàng]: Gồm {len(current_plan)} bước tiếp theo.")
-                continue
+                parsed_plan = json.loads(rp_content.strip())
+                if isinstance(parsed_plan, dict):
+                    for val in parsed_plan.values():
+                        if isinstance(val, list):
+                            parsed_plan = val
+                            break
+                    if not isinstance(parsed_plan, list):
+                        parsed_plan = [parsed_plan]
+                
+                if isinstance(parsed_plan, list) and len(parsed_plan) > 0:
+                    current_plan = parsed_plan
+                    step_pointer = 0
+                    if verbose:
+                        print(f"✅ [Kế hoạch mới đã sẵn sàng]: Gồm {len(current_plan)} bước tiếp theo.")
+                    continue
             except Exception as e:
                 if verbose:
                     print(f"⚠️ Re-planning thất bại: {e}. Tiếp tục kế hoạch cũ.")

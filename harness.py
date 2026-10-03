@@ -113,7 +113,13 @@ def check_permission(
     # 1. Kiểm tra thao tác thanh toán trừ tiền (pay)
     if tool_name == "pay":
         booking_id = args.get("booking_id")
-        amount = args.get("amount", 0)
+        raw_amount = args.get("amount", 0)
+        try:
+            import re
+            cleaned_num = re.sub(r"[^\d]", "", str(raw_amount))
+            amount = int(cleaned_num) if cleaned_num else 0
+        except Exception:
+            amount = 0
 
         # Kiểm tra vượt ngân sách cho phép
         if amount > constraints.max_price:

@@ -14,10 +14,16 @@ import sys
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
-# Tự động nạp cấu hình từ file .env nếu có
+# Tự động nạp cấu hình từ file .env nếu có (tìm cả thư mục gốc và thư mục agent)
 load_dotenv()
+agent_env = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(agent_env):
+    load_dotenv(agent_env)
+root_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+if os.path.exists(root_env):
+    load_dotenv(root_env)
 
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.outputs import ChatResult, ChatGeneration
 
@@ -139,32 +145,200 @@ class MockFlightChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=msg)])
 
 
+class UITOpenAIChatModel(BaseChatModel):
+    """
+    Client LangChain thuần túy kết nối GPU UIT hoặc OpenAI bằng thư viện openai chính thức.
+    Khắc phục triệt để lỗi DLL load failed của tiktoken trên môi trường Windows bị chặn policy.
+    """
+    model_name: str
+    api_key: str
+    base_url: Optional[str] = None
+    tools_list: Optional[List[Any]] = None
+    temperature: float = 0.0
+
+    @property
+    def _llm_type(self) -> str:
+        return "uit_openai_chat_model"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        return UITOpenAIChatModel(
+            model_name=self.model_name,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            tools_list=list(tools) if tools else None,
+            temperature=self.temperature
+        )
+
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        import openai
+        import httpx
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+
+        client_kwargs = {
+            "api_key": self.api_key,
+            "http_client": httpx.Client(verify=False)
+        }
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+        client = openai.OpenAI(**client_kwargs)
+
+        formatted_messages = []
+        for m in messages:
+            if isinstance(m, HumanMessage):
+                formatted_messages.append({"role": "user", "content": str(m.content)})
+            elif isinstance(m, SystemMessage):
+                formatted_messages.append({"role": "system", "content": str(m.content)})
+            elif isinstance(m, ToolMessage):
+                formatted_messages.append({
+                    "role": "tool",
+                    "content": str(m.content),
+                    "tool_call_id": getattr(m, "tool_call_id", "call_default")
+                })
+            elif isinstance(m, AIMessage):
+                msg_dict = {"role": "assistant", "content": str(m.content or "")}
+                if getattr(m, "tool_calls", None):
+                    msg_dict["tool_calls"] = [
+                        {
+                            "id": tc.get("id", f"call_{i}"),
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("name"),
+                                "arguments": json.dumps(tc.get("args", {}))
+                            }
+                        }
+                        for i, tc in enumerate(m.tool_calls)
+                    ]
+                formatted_messages.append(msg_dict)
+            else:
+                formatted_messages.append({"role": "user", "content": str(m.content)})
+
+        create_kwargs = {
+            "model": self.model_name,
+            "messages": formatted_messages,
+            "temperature": self.temperature
+        }
+        if "qwen" in self.model_name.lower():
+            create_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+
+        res = None
+        if self.tools_list:
+            create_kwargs["tools"] = [convert_to_openai_tool(t) for t in self.tools_list]
+            try:
+                res = client.chat.completions.create(**create_kwargs)
+            except Exception as e:
+                # Nếu server vLLM chưa bật --enable-auto-tool-choice, tự động chuyển sang Prompt-based Tool Calling
+                if "tool" in str(e).lower() or "400" in str(e):
+                    create_kwargs.pop("tools", None)
+                    tools_desc = "\n".join([f"- {t.name}: {t.description}" for t in self.tools_list])
+                    injection = (
+                        f"\n\nBẠN CÓ CÁC CÔNG CỤ SAU:\n{tools_desc}\n"
+                        f"KHI CẦN GỌI CÔNG CỤ, HÃY TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON:\n"
+                        f'{{"tool": "tên_công_cụ", "args": {{...}}}}\n'
+                        f"KHÔNG THÊM BẤT KỲ VĂN BẢN NÀO NGOÀI JSON."
+                    )
+                    if formatted_messages and formatted_messages[0]["role"] == "system":
+                        formatted_messages[0]["content"] += injection
+                    else:
+                        formatted_messages.insert(0, {"role": "system", "content": injection})
+                    res = client.chat.completions.create(**create_kwargs)
+                else:
+                    raise e
+        else:
+            res = client.chat.completions.create(**create_kwargs)
+
+        choice = res.choices[0]
+
+        parsed_tool_calls = []
+        if getattr(choice.message, "tool_calls", None):
+            for tc in choice.message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except Exception:
+                    args = {}
+                parsed_tool_calls.append({
+                    "name": tc.function.name,
+                    "args": args,
+                    "id": tc.id
+                })
+        elif choice.message.content:
+            import re
+            text = choice.message.content.strip()
+            # 1. Bắt cú pháp call:tool_name{args} đặc thù của Gemma
+            gemma_match = re.search(r'call:(\w+)\{(.*?)\}', text)
+            if gemma_match:
+                tool_name = gemma_match.group(1)
+                raw_args = gemma_match.group(2)
+                parsed_args = {}
+                for pair in raw_args.split(","):
+                    if ":" in pair:
+                        k, v = pair.split(":", 1)
+                        k = k.strip().strip("'\"")
+                        v = v.strip().strip("'\"")
+                        try:
+                            v = int(v)
+                        except ValueError:
+                            pass
+                        parsed_args[k] = v
+                parsed_tool_calls.append({
+                    "name": tool_name,
+                    "args": parsed_args,
+                    "id": f"call_gemma_1"
+                })
+            elif "tool" in text:
+                raw = text
+                if raw.startswith("```json"): raw = raw[7:]
+                if raw.startswith("```"): raw = raw[3:]
+                if raw.endswith("```"): raw = raw[:-3]
+                try:
+                    data = json.loads(raw.strip())
+                    if isinstance(data, dict) and "tool" in data:
+                        parsed_tool_calls.append({
+                            "name": data["tool"],
+                            "args": data.get("args", {}),
+                            "id": f"call_1"
+                        })
+                except Exception:
+                    pass
+
+        token_usage = {
+            "total_tokens": getattr(res.usage, "total_tokens", 0),
+            "prompt_tokens": getattr(res.usage, "prompt_tokens", 0),
+            "completion_tokens": getattr(res.usage, "completion_tokens", 0),
+        }
+
+        ai_msg = AIMessage(
+            content=choice.message.content or "",
+            tool_calls=parsed_tool_calls,
+            response_metadata={"token_usage": token_usage}
+        )
+        return ChatResult(generations=[ChatGeneration(message=ai_msg)])
+
+
 def get_llm(agent_type: str = "react"):
     """
-    Trả về ChatOpenAI thật nếu có API Key (hỗ trợ OpenAI và GPU UIT qua base_url),
-    ngược lại trả về MockFlightChatModel.
+    Trả về mô hình LLM thật (UITOpenAIChatModel) nếu có API Key,
+    ngược lại fallback về MockFlightChatModel.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     base_url = os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
     model_name = os.environ.get("SE373_MODEL", "gpt-4o-mini")
 
-    if api_key:
+    if api_key and api_key.strip():
         try:
-            from langchain_openai import ChatOpenAI
-            init_kwargs = {
-                "model": model_name,
-                "api_key": api_key,
-                "temperature": 0.0
-            }
-            if base_url:
-                init_kwargs["base_url"] = base_url
-            # Nếu dùng mô hình Qwen của UIT, tắt thinking để gọi tool nhanh hơn theo tài liệu hướng dẫn
-            if "qwen" in model_name.lower():
-                init_kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
-
-            return ChatOpenAI(**init_kwargs)
-        except Exception:
-            pass
+            return UITOpenAIChatModel(
+                model_name=model_name,
+                api_key=api_key.strip(),
+                base_url=base_url.strip() if base_url else None,
+                temperature=0.0
+            )
+        except Exception as e:
+            print(f"⚠️ [LLM Setup] Lỗi khởi tạo client: {e}. Đang chuyển về MockLLM.")
 
     # Fallback mô phỏng thông minh
     return MockFlightChatModel(agent_type=agent_type)
